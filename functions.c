@@ -1,94 +1,73 @@
 #include "shell.h"
+
 /**
- * read_line - reads a line from standard input
- * Return: the line read
+ * is_interactive - checks if the shell is in interactive mode
+ * @info: struct address
+ * Return: 1 or 0
  */
-char *read_line(void)
+int is_interactive(info_t *info)
 {
-	char *line = NULL;
-	size_t bufsize = 0;
-
-	getline(&line, &bufsize, stdin);
-	return (line);
-}
-/**
- * split_line - splits line
- * @line: char
- * Return: tokens
- */
-char **split_line(char *line)
-{
-	int bufsize = BUFFER_SIZE;
-	int position = 0;
-	char **tokens = malloc(bufsize * sizeof(char *));
-	char *token;
-
-	if (!tokens)
-	{
-		perror("Allocation error");
-		exit(EXIT_FAILURE);
-	}
-
-	token = strtok(line, " \t\n\r\a");
-	while (token != NULL)
-	{
-		tokens[position] = token;
-		position++;
-
-		if (position >= bufsize)
-		{
-			bufsize += BUFFER_SIZE;
-			tokens = realloc(tokens, bufsize * sizeof(char *));
-			if (!tokens)
-			{
-				perror("Allocation error");
-				exit(EXIT_FAILURE);
-			}
-		}
-
-		token = strtok(NULL, " \t\n\r\a");
-	}
-	tokens[position] = NULL;
-
-	return (tokens);
+	return (isatty(STDIN_FILENO) && info->readfiled <= 2);
 }
 
 /**
- * execute_command - execute command
- * @args: arguments
- * Return: 1
+ * is_delimiter - checks if a character is a delimiter
+ * @c: the character to be checked
+ * @del: the delimeter string
+ * Return: 1 if the character is a delimiter, 0 otherwise
  */
-int execute_command(char **args)
+int is_delimiter(char c, char *del)
 {
-	pid_t pid;
-	int status;
+	while (*del)
+		if (*del++ == c)
+			return (1);
+	return (0);
+}
 
-	if (args[0] == NULL)
+/**
+ *is_alpha - checks if character is alpha
+ *@c: the input
+ *Return: 1 if ture, 0 otherwise
+ */
+
+int is_alpha(int c)
+{
+	if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
 		return (1);
-
-	if (is_builtin(args))
-		return (1);
-
-	pid = fork();
-	if (pid == 0)
-	{
-		if (execvp(args[0], args) == -1)
-		{
-			write_string("Command not found\n");
-			exit(EXIT_FAILURE);
-		}
-	}
-	else if (pid < 0)
-	{
-		write_string("Fork failed\n");
-		exit(EXIT_FAILURE);
-	}
 	else
+		return (0);
+}
+
+/**
+ *string_integer - changes a string into an integer
+ *@s: the string to be changed
+ *Return: 0 if there are no numbers in the string, converted number otherwise
+ */
+
+int string_integer(char *s)
+{
+	int i, sign = 1, flag = 0, output;
+	unsigned int result = 0;
+
+	for (i = 0;  s[i] != '\0' && flag != 2; i++)
 	{
-		do {
-			waitpid(pid, &status, WUNTRACED);
-		} while (!WIFEXITED(status) && !WIFSIGNALED(status));
+		if (s[i] == '-')
+			sign *= -1;
+
+		if (s[i] >= '0' && s[i] <= '9')
+		{
+			flag = 1;
+			result *= 10;
+			result += (s[i] - '0');
+		}
+		else if (flag == 1)
+			flag = 2;
 	}
 
-	return (1);
+	if (sign == -1)
+		output = -result;
+	else
+		output = result;
+
+	return (output);
 }

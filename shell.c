@@ -1,99 +1,155 @@
 #include "shell.h"
 /**
- * shell_exit - exit the shell
- * @args: arguments
- * Return: int
+ * hsh - Main shell loop.
+ * @info: Structure containing parameter and return information.
+ * @av: Argument vector from the main() function.
+ * Return: 0 on success, 1 on error, or an error code.
  */
-int shell_exit(char **args)
+int hsh(info_t *info, char **av)
 {
-	if (args[1] != NULL)
-	{
-		int status = atoi(args[1]);
+	ssize_t r = 0;
+	int builtin_ret = 0;
 
-		exit(status);
+	while (r != -1 && builtin_ret != -2)
+	{
+		clear_info(info);
+		if (is_interactive(info))
+			_puts("$ ");
+		_eputchar(BUF_FLUSH);
+		r = get_input(info);
+		if (r != -1)
+		{
+			set_info(info, av);
+			builtin_ret = find_builtin(info);
+			if (builtin_ret == -1)
+				find_cmd(info);
+		}
+		else if (is_interactive(info))
+			_putchar('\n');
+		free_info(info, 0);
 	}
-	exit(EXIT_SUCCESS);
+	write_history(info);
+	free_info(info, 1);
+	if (!is_interactive(info) && info->status)
+		exit(info->status);
+	if (builtin_ret == -2)
+	{
+		if (info->error_nb == -1)
+			exit(info->status);
+		exit(info->error_nb);
+	}
+	return (builtin_ret);
 }
 
 /**
- * shell_env - prints out the environment variables in the shell
- * @args: arguments
- * Return: 1
+ * find_builtin - Finds a builtin command.
+ * @info: Structure containing parameter and return information.
+ * Return: -1 if builtin not found,
+ *			0 if builtin executed successfully,
+ *			1 if builtin found but not successful,
+ *			-2 if builtin signals exit()
  */
-int shell_env(char **args __attribute__((unused)))
+int find_builtin(info_t *info)
 {
-	extern char **environ;
-	char **env = environ;
+	int i, built_in_ret = -1;
+	builtin_table builtintbl[] = {
+		{"exit", shell_exit},
+		{"env", my_env},
+		{"help", shell_help},
+		{"history", my_history},
+		{"setenv", myset_env},
+		{"unsetenv", myunset_env},
+		{"cd", shell_cd},
+		{"alias", my_alias},
+		{NULL, NULL}
+	};
 
-	while (*env != NULL)
-	{
-		write_string(*env);
-		write_string("\n");
-		env++;
-	}
-
-	return (1);
+	for (i = 0; builtintbl[i].type; i++)
+		if (_strcmp(info->argv[0], builtintbl[i].type) == 0)
+		{
+			info->count_of_line++;
+			built_in_ret = builtintbl[i].func(info);
+			break;
+		}
+	return (built_in_ret);
 }
 
 /**
- * shell_setenv - modifies an environment variable in the shell
- * @args: arguments
- * Return: 1
+ * find_cmd - Finds a command in the PATH.
+ * @info:Structure containing parameter and return information.
+ * Return: void.
  */
-int shell_setenv(char **args)
+void find_cmd(info_t *info)
 {
-	if (args[1] == NULL || args[2] == NULL)
-	{
-		write_string("Usage: setenv <variable> <value>\n");
-		return (1);
-	}
+	char *path = NULL;
+	int i, k;
 
-	if (setenv(args[1], args[2], 1) != 0)
+	info->path = info->argv[0];
+	if (info->count_flag == 1)
 	{
-		perror("setenv");
+		info->count_of_line++;
+		info->count_flag = 0;
 	}
+	for (i = 0, k = 0; info->arg[i]; i++)
+		if (!is_delimiter(info->arg[i], " \t\n"))
+			k++;
+	if (!k)
+		return;
 
-	return (1);
+	path = find_path(info, get_env(info, "PATH="), info->argv[0]);
+	if (path)
+	{
+		info->path = path;
+		fork_cmd(info);
+	}
+	else
+	{
+		if ((is_interactive(info) || get_env(info, "PATH=")
+			|| info->argv[0][0] == '/') && is_cmd(info, info->argv[0]))
+			fork_cmd(info);
+		else if (*(info->arg) != '\n')
+		{
+			info->status = 127;
+			print_error(info, "not found\n");
+		}
+	}
 }
 
 /**
- * shell_unsetenv - removes an environment variable from the shell
- * @args: arguments
- * Return: 1
+ * fork_cmd - Forks an exec thread to run the command.
+ * @info:  Structure containing parameter and return information.
+ * Return: void.
  */
-int shell_unsetenv(char **args)
+void fork_cmd(info_t *info)
 {
-	if (args[1] == NULL)
+	pid_t child_pid;
+
+	child_pid = fork();
+	if (child_pid == -1)
 	{
-		write_string("Usage: unsetenv <variable>\n");
-		return (1);
+		/* TODO: PUT ERROR FUNCTION */
+		perror("Error:");
+		return;
 	}
-
-	if (unsetenv(args[1]) != 0)
+	if (child_pid == 0)
 	{
-		perror("unsetenv");
+		if (execve(info->path, info->argv, get_environ(info)) == -1)
+		{
+			free_info(info, 1);
+			if (errno == EACCES)
+				exit(126);
+			exit(1);
+		}
+		/* TODO: PUT ERROR FUNCTION */
 	}
-
-	return (1);
-}
-
-/**
- * shell_cd - allows the user to change the current working directory
- * @args: arguments
- * Return: 1
- */
-int shell_cd(char **args)
-{
-	if (args[1] == NULL)
+	else
 	{
-		write_string("Usage: cd <directory>\n");
-		return (1);
+		wait(&(info->status));
+		if (WIFEXITED(info->status))
+		{
+			info->status = WEXITSTATUS(info->status);
+			if (info->status == 126)
+				print_error(info, "Permission denied\n");
+		}
 	}
-
-	if (chdir(args[1]) != 0)
-	{
-		perror("cd");
-	}
-
-	return (1);
 }
